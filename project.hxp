@@ -87,7 +87,7 @@ class Project extends HXProject
    * The company name for the game.
    * This appears in metadata in places I think.
    */
-  static final COMPANY:String = "The Funkin' Crew";
+  static final COMPANY:String = "The Funkin' Crew x J3zzux";
 
   /**
    * The app's localization languages.
