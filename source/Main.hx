@@ -32,7 +32,7 @@ class Main extends Sprite
   var gameHeight:Int = 720; // Height of the game in pixels (might be less / more in actual pixels depending on your zoom).
   var initialState:Class<FlxState> = funkin.InitState; // The FlxState the game starts with.
   var zoom:Float = -1; // If -1, zoom is automatically calculated to fit the window dimensions.
-  var skipSplash:Bool = true; // Whether to skip the flixel splash screen that appears in release mode.
+  var skipSplash:Bool = false; // Whether to skip the flixel splash screen that appears in release mode.
 
   // You can pretty much ignore everything from here on - your code should go in your states.
 
