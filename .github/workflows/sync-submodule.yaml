@@ -1,0 +1,28 @@
+name: Sync Submodule
+
+on:
+  schedule:
+    - cron: '0 * * * *' # Runs every hour, or change to a push event
+  workflow_dispatch: # Allows manual trigger
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update Submodules
+        run: |
+          git submodule update --remote --recursive
+
+      - name: Commit and Push Changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git diff-index --quiet HEAD || git commit -m "Automated submodule update"
+          git push
