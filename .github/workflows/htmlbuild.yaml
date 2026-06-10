@@ -16,49 +16,45 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v6
 
-    # 1. Install Haxe (Required for Lime)
+    # 1. Setup V-Slice Compatible Haxe Version
     - name: Setup Haxe
       uses: krdlab/setup-haxe@v1
       with:
-        haxe-version: 4.3.4 # Change this to match your local Haxe version if needed
+        haxe-version: 4.3.4
 
-    # 2. Install Lime and setup its dependencies
-    - name: Install Lime & Tools
+    # 2. Complete Environment Configuration & Error Prevention
+    - name: Install V-Slice Dependencies
       shell: cmd
       run: |
+        :: Re-register baseline tools
         haxelib install lime
         haxelib run lime setup
         haxelib install openfl
         haxelib install flixel
-        :: Add any other specific haxelibs your game needs here (e.g., haxelib install flixel-addons)
+        
+        :: Install Haxe Module Manager globally
+        haxelib --global install hmm
+        haxelib --global run hmm setup
+        
+        :: CRITICAL V-SLICE FIX: Remove funkin.vis from hmm configuration to prevent compilation lock
+        powershell -Command "(Get-Content hmm.json) -replace '\"funkin.vis\"', '// \"funkin.vis\"' | Set-Content hmm.json"
+        
+        :: Synchronize and pull precise V-Slice Git libraries 
+        hmm install
 
-    # 3. Download and Install Itch.io Butler tool
-    - name: Setup Butler
-      shell: cmd
-      run: |
-        curl -L -o butler.zip https://itch.ovh
-        powershell -Command "Expand-Archive -Path butler.zip -DestinationPath C:\butler"
-        echo C:\butler >> %GITHUB_PATH%
-
+    # 3. Create the automated target container
     - name: Create output directory
       shell: cmd
       run: |
         if not exist "pre-built builds" mkdir "pre-built builds"
 
-    # 4. Execute the build and capture output before Butler uploads
+    # 4. Trigger isolated batch compilation
     - name: Run build script
       shell: cmd
-      env:
-        BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }} # Required for Butler to push without an interactive login prompt
       run: |
         call scripts\itch-building\build-Itch-HTML.bat
 
-    # 5. Move the HTML5 bin export files to your repository output folder
-    - name: Stage Artifacts
-      shell: cmd
-      run: |
-        if exist export\debug\html5\bin xcopy /E /Y export\debug\html5\bin "pre-built builds\"
-
+    # 5. Commit compiled HTML5 assets directly back to the repository
     - name: Commit and push changes
       shell: cmd
       run: |
