@@ -1,0 +1,33 @@
+name: Run Batch Build
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Create output directory
+      run: mkdir -p "pre-built builds"
+
+    - name: Run build script
+      shell: cmd
+      run: |
+        call scripts\itch-building\build-Itch-HTML.bat
+
+    - name: Commit and push changes
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "41898282+github-actions[bot]@://github.com"
+        git add "pre-built builds/*"
+        git diff-index --quiet HEAD || git commit -m "Add automated build artifacts"
+        git push origin main
