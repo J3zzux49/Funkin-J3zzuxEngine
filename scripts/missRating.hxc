@@ -1,0 +1,115 @@
+import funkin.modding.module.Module;
+import funkin.graphics.FunkinSprite;
+import funkin.play.PlayState;
+import funkin.util.EaseUtil;
+import funkin.Conductor;
+import funkin.Paths;
+import flixel.tweens.FlxTween;
+import flixel.FlxG;
+import Assets;
+
+class MissRating extends Module {
+    function new() {
+        super("MissRating", 100000);
+    }
+
+    function onNoteMiss(event) {
+        super.onNoteMiss(event);
+
+        if (PlayState.instance == null || event.eventCanceled) return;
+
+        var popups = PlayState.instance.comboPopUps;
+        if (popups == null) {
+            // trace("comboPopUps is null");
+            return;
+        }
+
+        //trace("creating miss popup");
+        //trace("Note style ID: " + popups.noteStyle.id);
+        //trace("Is pixel: " + popups.noteStyle.isJudgementSpritePixel('good'));
+
+        // try multiple possible paths
+        var possiblePaths = [
+            Paths.image('ui/popup/${popups.noteStyle.id}/miss'),
+            Paths.image('ui/popup/funkin/miss'),
+            Paths.image('ui/popup/pixel/miss'),
+            Paths.image('popup/miss'),
+            Paths.image('ratings/miss')
+        ];
+
+        var assetPath:String = null;
+        var usedTargetId:String = 'funkin';
+
+        for (path in possiblePaths) {
+            if (path != null && Assets.exists(path)) {
+                assetPath = path;
+                // trace('Found asset at: $path');
+                break;
+            }
+        }
+
+        if (assetPath == null) {
+            // trace("no miss asset found in any location");
+            return;
+        }
+
+        // create our target rating sprite
+        var rating = new FunkinSprite();
+        var isPixel = popups.noteStyle.isJudgementSpritePixel('good');
+        rating.antialiasing = !isPixel;
+        rating.pixelPerfectRender = isPixel;
+        rating.pixelPerfectPosition = isPixel;
+        rating.scrollFactor.set(0.2, 0.2);
+
+        // determine targetId for scaling based on where we found the asset
+        if (assetPath.indexOf('pixel') != -1) {
+            usedTargetId = 'pixel';
+        } else if (assetPath.indexOf('funkin') != -1) {
+            usedTargetId = 'funkin';
+        }
+
+        // apply the texture
+        rating.loadGraphic(assetPath);
+        rating.scale.x = rating.scale.y = switch (usedTargetId) {
+            case 'funkin': 0.65;
+            case 'pixel': 4.2;
+            default: popups.noteStyle._data.assets.judgementGood?.scale ?? 1.0;
+        }
+        rating.updateHitbox();
+
+        //trace('rating dimensions: ${rating.width} x ${rating.height}');
+        //trace('rating scale: ${rating.scale.x}');
+
+        // add to game
+        rating.zIndex = 1000;
+
+        rating.x = (FlxG.width * 0.474);
+        rating.x -= rating.width / 2;
+        rating.y = (FlxG.camera.height * 0.45 - 60);
+        rating.y -= rating.height / 2;
+        rating.x += popups.offsets[0];
+        rating.y += popups.offsets[1];
+        
+        var styleOffsets = popups.noteStyle.getJudgementSpriteOffsets('good');
+        rating.x += styleOffsets[0];
+        rating.y += styleOffsets[1];
+
+        rating.acceleration.y = 550;
+        rating.velocity.y -= FlxG.random.int(140, 175);
+        rating.velocity.x -= FlxG.random.int(0, 10);
+
+        popups.add(rating);
+        //trace("added rating to popups");
+
+        var fadeEase = isPixel ? EaseUtil.stepped(2) : null;
+        FlxTween.tween(rating, {alpha: 0}, 0.2, {
+            onComplete: function() {
+                popups.remove(rating, true);
+                rating.destroy();
+                //trace("removed rating popup");
+            },
+            startDelay: Conductor.instance.beatLengthMs / 1000,
+            ease: fadeEase
+        });
+    }
+}
