@@ -10,24 +10,31 @@ permissions:
 
 jobs:
   build:
-    runs-on: windows-latest
+    # Explicitly using windows-2025 to bypass the upcoming windows-latest redirection
+    runs-on: windows-2025
 
     steps:
+    # Upgraded to v6 to natively support Node.js 24 without deprecation logs
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Create output directory
-      run: mkdir -p "pre-built builds"
+      shell: cmd
+      run: |
+        if not exist "pre-built builds" mkdir "pre-built builds"
 
     - name: Run build script
       shell: cmd
       run: |
+        cd %GITHUB_WORKSPACE%
         call scripts\itch-building\build-Itch-HTML.bat
 
     - name: Commit and push changes
+      shell: cmd
       run: |
         git config --global user.name "github-actions[bot]"
-        git config --global user.email "41898282+github-actions[bot]@://github.com"
+        git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
         git add "pre-built builds/*"
-        git diff-index --quiet HEAD || git commit -m "Add automated build artifacts"
-        git push origin main
+        
+        :: Checks if there are actual file changes to avoid throwing a Git error
+        git diff-index --quiet HEAD -- || (git commit -m "Add automated build artifacts" && git push origin main)
