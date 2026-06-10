@@ -1,6 +1,7 @@
 [submodule "assets"]
-	path = assets @ main
+	path = assets
 	url = https://github.com/J3zzux49/funkin.assets
+    branch = main
 [submodule "art"]
 	path = art
 	url = https://github.com/J3zzux49/Funkin.art
