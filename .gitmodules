@@ -1,5 +1,5 @@
 [submodule "assets"]
-	path = assets
+	path = assets @ main
 	url = https://github.com/J3zzux49/funkin.assets
 [submodule "art"]
 	path = art
