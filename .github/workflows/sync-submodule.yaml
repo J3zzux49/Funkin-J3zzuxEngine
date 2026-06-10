@@ -2,18 +2,29 @@ name: Sync Submodule
 
 on:
   schedule:
-    - cron: '0 * * * *' # Runs every hour, or change to a push event
+    - cron: '0 * * * *' # Runs every hour
   workflow_dispatch: # Allows manual trigger
+
+# Global variable to clear the Node.js warning
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   sync:
     runs-on: ubuntu-latest
+    
+    # FIX #1: Grants the runner write permissions to push changes
+    permissions:
+      contents: write
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
           submodules: true
           token: ${{ secrets.GITHUB_TOKEN }}
+          # FIX #2: Keeps your token active so 'git push' works
+          persist-credentials: true 
 
       - name: Update Submodules
         run: |
@@ -24,5 +35,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git diff-index --quiet HEAD || git commit -m "Automated submodule update"
-          git push
+          # Commits only if there are actual updates to push
+          git diff-index --quiet HEAD || (git commit -m "Automated submodule update" && git push)
