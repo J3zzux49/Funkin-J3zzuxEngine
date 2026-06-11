@@ -1,0 +1,849 @@
+import funkin.modding.module.Module;
+import funkin.data.freeplay.player.PlayerRegistry;
+import funkin.graphics.FunkinSprite;
+import funkin.play.PauseSubState;
+import funkin.play.PauseMode;
+import funkin.play.PlayState;
+import funkin.util.tools.StringTools;
+import funkin.util.HapticUtil;
+import funkin.util.TouchUtil;
+import funkin.util.SwipeUtil;
+import funkin.util.MathUtil;
+import funkin.ui.FullScreenScaleMode;
+import funkin.ui.AtlasText;
+import funkin.ui.AtlasFont;
+import funkin.Conductor;
+import funkin.Assets;
+import funkin.Paths;
+import flixel.group.FlxTypedSpriteGroup;
+import flixel.tweens.FlxTween;
+import flixel.tweens.FlxEase;
+import flixel.text.FlxTextBorderStyle;
+import flixel.text.FlxText;
+import flixel.FlxG;
+import Math;
+
+using StringTools;
+
+class PauseMenu extends Module {
+    var instance:PauseSubState;
+
+    private var shouldUpdate:Bool = true;
+
+    public var graphics = [
+        // "label" => "graphic to use"
+        "Restart Song" => "restart",
+        "Restart Cutscene" => "restart",
+        "Restart Dialogue" => "restart",
+        "Skip Cutscene" => "skip",
+        "Skip Dialogue" => "skip",
+        "Change Difficulty" => "difficulty",
+        "Enable Practice Mode" => "practice",
+        "Exit to Menu" => "exit",
+        "Return to Chart Editor" => "exit",
+        "Back" => "exit",
+    ];
+
+    var player:String;
+    var background:FunkinSprite;
+    var wires:FunkinSprite;
+    var pausedBG:FunkinSprite;
+    var pausedText:FunkinSprite;
+    var practiceModeText:FlxText;
+    var disk:FunkinSprite;
+
+    var songCurvedText:CurvedText;
+    var artistCurvedText:CurvedText;
+    var charterCurvedText:CurvedText;
+    var difficultyCurvedText:CurvedText;
+
+    var items:FlxTypedSpriteGroup;
+    var prevEntries:Array;
+    var itemHitboxes:Array = [];
+
+    function new() {
+        super("PauseMenu", 1000000);
+    }
+
+    override function onSubStateOpenEnd(event) {
+        super.onSubStateOpenEnd(event);
+
+        if (event.targetState is PauseSubState) {
+            instance = event.targetState;
+            initPause(instance);
+        }
+    }
+
+    override function onSubStateCloseBegin(event) {
+        super.onSubStateCloseBegin(event);
+        if (event.eventCanceled) return;
+
+        if (event.targetState is PauseSubState) {
+            transitionOut(instance);
+        }
+    }
+
+    override function onStateChangeEnd(event) {
+        super.onStateChangeEnd(event);
+        instance = null;
+    }
+
+    public function initPause(st:PauseSubState) {
+        var state = st;
+        var play = PlayState.instance;
+
+        if (play == null) return;
+
+        // hide base pause menu stuff
+        state.background.visible = false;
+        state.menuEntryText.visible = false;
+        state.metadata.visible = false;
+
+        // prepare object creation
+        player = PlayerRegistry.instance?.getCharacterOwnerId(play.currentChart?.characters?.player ?? 'bf') ?? 'bf';
+
+        function validatePath(path:String, fallback:String) {
+            if (Assets.exists(Paths.image(path))) return Paths.image(path);
+            return Paths.image(fallback);
+        }
+
+        // background
+        background = new FunkinSprite();
+        background.loadGraphic(validatePath("pause/bgGradient" + StringTools.toTitleCase(player), "pause/bgGradient"));
+        background.setGraphicSize(FlxG.width, FlxG.height);
+        background.scale.x = background.scale.y = Math.max(background.scale.x, background.scale.y);
+        background.updateHitbox();
+        background.screenCenter();
+        background.zIndex = -1;
+        background.alpha = 0;
+        state.add(background);
+
+        wires = new FunkinSprite();
+        wires.loadGraphic(Paths.image('pause/wires'));
+        wires.setGraphicSize(0, FlxG.height);
+        wires.scale.x = wires.scale.y;
+        wires.updateHitbox();
+        wires.x = FlxG.width - wires.width;
+        wires.scale.x = wires.scale.y = wires.scale.y * 4;
+        wires.zIndex = -1;
+        state.add(wires);
+
+        // "paused" text
+        pausedBG = new FunkinSprite();
+        pausedBG.loadGraphic(validatePath("pause/pausedBox" + StringTools.toTitleCase(player), "pause/pausedBoxBf"));
+        pausedBG.scale.set(0.7, 4/9);
+        pausedBG.updateHitbox();
+        pausedBG.zIndex = 2;
+        state.add(pausedBG);
+
+        pausedText = new FunkinSprite();
+        pausedText.loadGraphic(Paths.image('pause/pausedText'));
+        pausedText.scale.set(0.66, 0.66);
+        pausedText.updateHitbox();
+        pausedText.x = pausedBG.x = -pausedBG.width;
+        pausedText.zIndex = 2;
+        state.add(pausedText);
+
+        // practice mode text
+        practiceModeText = new FlxText(0, 0, 0, "Practice Mode: ON");
+        practiceModeText.setFormat(Paths.font("vcr.ttf"), 32, 0xffffffff, 'left', FlxTextBorderStyle.OUTLINE, 0xff000000);
+        practiceModeText.borderSize = 2;
+        practiceModeText.visible = PlayState.instance?.isPracticeMode ?? false;
+        practiceModeText.x = -practiceModeText.width;
+        practiceModeText.y = pausedBG.y + pausedBG.height - 12;
+        practiceModeText.zIndex = 2;
+        state.add(practiceModeText);
+
+        // disk
+        disk = new FunkinSprite();
+        disk.loadGraphic(validatePath('pause/${player}Disk', 'pause/bfDisk'));
+        disk.scale.set(0.45, 0.45);
+        disk.angle = -64;
+        disk.updateHitbox();
+        disk.setPosition(-disk.width, FlxG.height);
+        state.add(disk);
+
+        // disk text
+        songCurvedText = new CurvedText(40);
+        songCurvedText.angleOffset = -63.5;
+        songCurvedText.charAngle = 5.4;
+        songCurvedText.maxArc = 105;
+        songCurvedText.radius = disk.width * 0.38;
+        songCurvedText.radiusStep = 40;
+        songCurvedText.init(PlayState.instance.currentChart.songName);
+        state.add(songCurvedText.group);
+
+        artistCurvedText = new CurvedText(24);
+        artistCurvedText.angleOffset = songCurvedText.angleOffset;
+        artistCurvedText.charAngle = 2.6 + (1 * songCurvedText.linesCount);
+        artistCurvedText.maxArc = songCurvedText.maxArc;
+        artistCurvedText.radiusStep = 30;
+        artistCurvedText.radius = songCurvedText.radius - songCurvedText.linesCount * songCurvedText.radiusStep - 10;
+        artistCurvedText.init("By " + PlayState.instance.currentChart.songArtist);
+        state.add(artistCurvedText.group);
+
+        charterCurvedText = new CurvedText(32);
+        charterCurvedText.angleOffset = songCurvedText.angleOffset + 181;
+        charterCurvedText.charAngle = 4.5;
+        charterCurvedText.maxArc = 100;
+        charterCurvedText.radius = disk.width * 0.37;
+        charterCurvedText.radiusStep = 30;
+        charterCurvedText.init("Charted by\n" + PlayState.instance.currentChart.charter);
+        state.add(charterCurvedText.group);
+
+        difficultyCurvedText = new CurvedText(28);
+        difficultyCurvedText.angleOffset = charterCurvedText.angleOffset;
+        difficultyCurvedText.charAngle = 5.6;
+        difficultyCurvedText.maxArc = difficultyCurvedText.maxArc;
+        difficultyCurvedText.radiusStep = 26;
+        difficultyCurvedText.radius = charterCurvedText.radius - (charterCurvedText.linesCount * charterCurvedText.radiusStep) - 15;
+        difficultyCurvedText.init(PlayState.instance.currentDifficulty.replace('-', ' ').toUpperCase());
+        state.add(difficultyCurvedText.group);
+
+        // items
+        items = new FlxTypedSpriteGroup();
+        items.zIndex = 1;
+        state.add(items);
+
+        regenerateItems();
+
+        state.refresh(); // apply zIndex
+        transitionIn();
+    }
+
+    function transitionIn() {
+        if (instance == null) return;
+
+        FlxTween.tween(background, {alpha: 1}, 0.8, {ease: FlxEase.quartOut});
+        FlxTween.tween(wires.scale, {x: wires.scale.x / 4, y: wires.scale.y / 4}, 0.8, {ease: FlxEase.quintOut});
+        FlxTween.tween(disk, {x: -disk.width * 0.3, y: FlxG.height - disk.height * 0.51}, 0.8, {ease: FlxEase.cubeOut});
+        FlxTween.tween(practiceModeText, {x: Math.max(FullScreenScaleMode.gameNotchSize.x, 15)}, 0.8, {ease: FlxEase.cubeOut, startDelay: 0.4});
+        for (obj in [pausedBG, pausedText]) FlxTween.tween(obj, {x: 0}, 0.7, {ease: FlxEase.quartOut});
+    }
+
+    function regenerateItems() {
+        items.clear();
+        for (h in itemHitboxes) {
+            instance.remove(h);
+            h.destroy();
+        }
+        itemHitboxes = [];
+        items.x = 0;
+
+        var i = 0;
+        for (entry in instance.currentMenuEntries) {
+            if (entry == null) continue;
+
+            var key = graphics[entry.text] != null ? graphics[entry.text] : function(){
+                var parts = entry.text.split(" ");
+                var result = parts[0].toLowerCase();
+                for (j in 1...parts.length) result += StringTools.toTitleCase(parts[j]);
+                return result;
+            }();
+            var path = "pause/items/" + key;
+
+            var item:FunkinSprite;
+            if (Assets.exists(Paths.image(path))) {
+                var spr = new FunkinSprite();
+                if (Assets.exists(Paths.file('images/$path.xml'))) {
+                    spr.frames = Paths.getSparrowAtlas(path);
+                    spr.animation.addByPrefix('idle', '$key idle', 24);
+                    spr.animation.addByPrefix('selected', '$key selected', 24);
+                } else {
+                    trace("couldn't find a sparrow atlas for " + path);
+                    spr.loadGraphic(Paths.image(path));
+                    spr.animation.add('idle', [0]);
+                    spr.animation.add('selected', [0]);
+                }
+                spr.animation.play('idle');
+                item = spr;
+            } else {
+                // atlastext fallback
+                var txt = new AtlasText(0, 0, entry.text, AtlasFont.BOLD);
+                txt.scale.set(0.7, 0.7);
+                txt.updateHitbox();
+                item = txt;
+            }
+
+            item.updateHitbox();
+            item.setPosition(disk.width + FlxG.width / 30 - item.width / 2, (FlxG.height - item.height) / 2);
+            if (item is AtlasText) item.y -= item.members[0]?.height ?? 0;
+            item.y += 290 * i;
+            item.angle = 5 * (i - instance.currentEntry);
+            items.add(item);
+
+            var hitbox = new FunkinSprite();
+            hitbox.makeGraphic(1, 1, 0x00000000);
+            hitbox.setGraphicSize(Math.ceil(item.width), Math.ceil(item.height));
+            hitbox.updateHitbox();
+            hitbox.setPosition(item.x, item.y);
+            hitbox.angle = item.angle;
+            hitbox.zIndex = 1;
+            instance.add(hitbox);
+            itemHitboxes.push(hitbox);
+
+            i++;
+        }
+
+        SwipeUtil.calculateSwipeThreshold(items.members, 0x10, 0.55);
+        copyEntries();
+    }
+
+    function changeSelection(elapsed:Float) {
+        var selection = instance.currentEntry;
+        var targetY = 290 * selection;
+
+        var members = items.members;
+        var len = members.length;
+        var i = 0;
+        while (i < len) {
+            var item = members[i];
+            var selected = (i == selection);
+
+            // animation
+            var targetAnim = selected ? 'selected' : 'idle';
+            if (item.animation?.curAnim?.curName != targetAnim && item.animation?.getByName(targetAnim) != null) {
+                item.animation?.play(targetAnim);
+            }
+
+            // scale
+            var min = #if mobile 1.05 #else 1.03 #end;
+            var max = #if mobile 1.3 #else 1.26 #end;
+            item.scale.x = item.scale.y = MathUtil.smoothLerpPrecision(item.scale.y, selected ? max : min, elapsed, 0.307);
+
+            // position
+            var itemX = disk.width + 90 + (FlxG.width - 1280) / 3 - item.width / 2;
+            if (item is AtlasText) {
+                for (a in item.members) itemX -= a.width / 1.5;
+                itemX -= 50 * (item.text.split(' ').length-1);
+            }
+            item.x = MathUtil.smoothLerpPrecision(item.x, itemX + 15 * (i - selection), elapsed, 0.25);
+
+            // angle
+            item.angle = MathUtil.smoothLerpPrecision(item.angle, 8 * (i - selection), elapsed, 0.25);
+
+            if (i < itemHitboxes.length) {
+                var hitbox = itemHitboxes[i];
+                hitbox.setGraphicSize(Math.ceil(item.width), Math.ceil(item.height));
+                hitbox.scale.x *= item.scale.x;
+                hitbox.scale.y *= item.scale.y;
+                hitbox.setPosition(item.x, item.y);
+                hitbox.angle = item.angle;
+                hitbox.updateHitbox();
+            }
+
+            i++;
+        }
+
+        // scroll
+        items.y = MathUtil.smoothLerpPrecision(items.y, -targetY, elapsed, 0.22);
+
+        // practice mode text visibility update
+        practiceModeText?.visible = PlayState.instance?.isPracticeMode ?? false;
+    }
+
+    function difficultyMenu() {
+        items.clear();
+        for (h in itemHitboxes) {
+            instance.remove(h);
+            h.destroy();
+        }
+        itemHitboxes = [];
+        items.y = 0;
+
+        // add our own button to return
+        #if mobile
+        instance.currentMenuEntries[instance.currentMenuEntries.length - 1] = null;
+        instance.clearAndAddMenuEntries();
+
+        if (instance.backButton == null) {
+            instance.addBackButton(FlxG.width - 230, FlxG.height - 200, null, function(){
+                FlxTween.cancelTweensOf(instance.backButton);
+                PauseSubState.switchMode(instance, PauseMode.Standard);
+                instance.remove(instance.backButton);
+            }, 0.4, true);
+        }
+        instance.add(instance.backButton);
+        instance.backButton.alpha = 0;
+        instance.backButton.playOutAnim();
+        #end
+        copyEntries();
+
+        var i = 0;
+        var entries = instance.currentMenuEntries;
+        while (i < entries.length) {
+            var entry = entries[i];
+            var key = (function() {
+                var parts = entry.text.split(" ");
+                var result = parts[0].toLowerCase();
+                var j = 1;
+                while (j < parts.length) {
+                    result += StringTools.toTitleCase(parts[j]);
+                    j++;
+                }
+                return result;
+            })();
+
+            var path = "pause/items/difficulties/" + key;
+            if (entry.text == "Back") path = 'pause/items/$key';
+
+            var labelItem:FunkinSprite;
+            if (Assets.exists(Paths.image(path))) {
+                var spr = new FunkinSprite();
+                if (Assets.exists(Paths.file('images/$path.xml'))) {
+                    spr.frames = Paths.getSparrowAtlas(path);
+                    spr.animation.addByPrefix('idle', '$key idle', 24);
+                    spr.animation.play('idle');
+                } else {
+                    spr.loadGraphic(Paths.image(path));
+                }
+                labelItem = spr;
+            } else {
+                // atlastext fallback
+                var txt = new AtlasText(0, 0, entry.text, AtlasFont.BOLD);
+                txt.scale.set(0.8, 0.8);
+                txt.updateHitbox();
+                labelItem = txt;
+            }
+            labelItem.scale.set(1.1, 1.1);
+            labelItem.updateHitbox();
+            items.add(labelItem);
+
+            if (entry.text != "Back") {
+                var circleThing = new FunkinSprite();
+                circleThing.frames = Paths.getSparrowAtlas('pause/items/cricle');
+                circleThing.animation.addByPrefix('idle', 'idle', 24);
+                circleThing.animation.addByPrefix('selected', 'selected', 24);
+                circleThing.animation.play('idle');
+                circleThing.scale.set(1 / 3, 1 / 3);
+                circleThing.updateHitbox();
+                circleThing.y = 150 * i;
+                labelItem.setPosition(
+                    circleThing.x + circleThing.width + FlxG.width / 45,
+                    150 * i - (labelItem.height - circleThing.height) / 2
+                );
+                items.add(circleThing);
+            }
+            else {
+                labelItem.scale.set(0.66, 0.66);
+                labelItem.updateHitbox();
+                labelItem.setPosition(FlxG.width / 45, 150 * i - labelItem.height / 5);
+            }
+
+            if (labelItem is AtlasText) {
+                labelItem.y -= labelItem.members[0]?.height ?? 0;
+                for (a in labelItem.members) labelItem.x -= a.width / 2;
+            }
+
+            var hitbox = new FunkinSprite();
+            hitbox.makeGraphic(1, 1, 0x00000000);
+            hitbox.setGraphicSize(Math.ceil(labelItem.width), Math.ceil(labelItem.height));
+            hitbox.updateHitbox();
+            hitbox.setPosition(labelItem.x, labelItem.y);
+            hitbox.angle = labelItem.angle;
+            hitbox.zIndex = 1;
+            instance.add(hitbox);
+            itemHitboxes.push(hitbox);
+
+            i++;
+        }
+        items.screenCenter();
+        items.x += disk.width / 3;
+        items.y += 30;
+
+        SwipeUtil.calculateSwipeThreshold(items.members, 0x10, 2.0);
+    }
+
+    function changeDifficultySelection(elapsed:Float) {
+        var selection = instance.currentEntry;
+        var members = items.members;
+        var len = members.length;
+        var i = 0;
+        while (i < len) {
+            var item = members[i];
+            var selected = Math.floor(i / 2) == selection;
+
+            if (i % 2 == 0) {
+                // the label
+                var circleThing = members[i + 1] ?? members[i - 1];
+                var itemX = circleThing.x + circleThing.width + FlxG.width / 45;
+                if (members[i + 1] == null) itemX -= circleThing.width * 0.85;
+                if (item is AtlasText) for (a in item.members) itemX -= a.width / 2;
+                item.x = MathUtil.smoothLerpPrecision(item.x, itemX + (selected ? 10 : 0), elapsed, 0.25);
+
+                var hitboxIndex = Std.int(i / 2);
+                if (hitboxIndex < itemHitboxes.length) {
+                    var hitbox = itemHitboxes[hitboxIndex];
+                    hitbox.setGraphicSize(Math.ceil(item.width), Math.ceil(item.height));
+                    hitbox.scale.x *= item.scale.x;
+                    hitbox.scale.y *= item.scale.y;
+                    hitbox.setPosition(item.x, item.y);
+                    hitbox.angle = item.angle;
+                    hitbox.updateHitbox();
+                }
+            } else {
+                // the circle...thing
+                var targetAnim = selected ? 'selected' : 'idle';
+                if (item.animation?.curAnim?.curName != targetAnim) item.animation.play(targetAnim);
+            }
+            i++;
+        }
+    }
+
+    // a compromise for getting rid of base hitboxes
+    function handleTouchControls() {
+        if (!instance.allowInput) return;
+
+        #if FEATURE_TOUCH_CONTROLS
+        var selection = instance.currentEntry;
+
+        // move out of bounds to get rid of base touch hitbox
+        if (instance.menuEntryText != null) {
+            var menuMembers = instance.menuEntryText.members;
+            var i = 0;
+            while (i < menuMembers.length) {
+                menuMembers[i].x = -FlxG.width - menuMembers[i].width;
+                i++;
+            }
+        }
+
+        // swipe navigation
+        if (SwipeUtil.swipeUp || SwipeUtil.flickUp) {
+            instance.changeSelection(-1);
+            HapticUtil.vibrate(0, 0.01, 0.5);
+            return;
+        }
+        if (SwipeUtil.swipeDown || SwipeUtil.flickDown) {
+            instance.changeSelection(1);
+            HapticUtil.vibrate(0, 0.01, 0.5);
+            return;
+        }
+
+        // press on menu items via dedicated hitboxes
+        for (i in 0...itemHitboxes.length) {
+            var hitbox = itemHitboxes[i];
+            if (TouchUtil.pressAction(hitbox, instance.camera, false)) {
+                if (i == selection) {
+                    instance.currentMenuEntries[i].callback(instance);
+                    HapticUtil.vibrate(0, 0.05, 1);
+                } else {
+                    instance.changeSelection(i - selection);
+                    HapticUtil.vibrate(0, 0.01, 0.5);
+                }
+                break;
+            }
+        }
+        #end
+    }
+
+    override function onUpdate(event) {
+        super.onUpdate(event);
+
+        if (PlayState.instance?.subState == null) instance = null;
+        if (instance != null && disk != null && shouldUpdate) {
+            // disk spin
+            disk.angle += event.elapsed * 50;
+
+            // disk text
+            // update all curved text positions
+            var centerX = disk.x + disk.width / 2;
+            var centerY = disk.y + disk.height / 2;
+            songCurvedText?.updatePositions(centerX + 10, centerY, disk.angle);
+            artistCurvedText?.updatePositions(centerX + 12, centerY + 10, disk.angle);
+            charterCurvedText?.updatePositions(centerX, centerY, disk.angle);
+            difficultyCurvedText?.updatePositions(centerX, centerY, disk.angle);
+
+            if (instance.currentMode != PauseMode.Difficulty) {
+                // menu entries
+                var curLen = instance.currentMenuEntries.length;
+                if (curLen != prevEntries.length) {
+                    regenerateItems();
+                } else {
+                    var changed = false;
+                    var i = 0;
+                    while (i < curLen) {
+                        if (prevEntries[i].text != instance.currentMenuEntries[i].text) {
+                            changed = true;
+                            break;
+                        }
+                        i++;
+                    }
+                    if (changed) regenerateItems();
+                }
+                changeSelection(event.elapsed);
+            } else {
+                // difficulty menu
+                var curLen = instance.currentMenuEntries.length;
+                if (curLen != prevEntries.length) {
+                    difficultyMenu();
+                } else {
+                    var changed = false;
+                    var i = 0;
+                    while (i < curLen) {
+                        if (prevEntries[i].text != instance.currentMenuEntries[i].text) {
+                            changed = true;
+                            break;
+                        }
+                        i++;
+                    }
+                    if (changed) difficultyMenu();
+                }
+                changeDifficultySelection(event.elapsed);
+            }
+
+            handleTouchControls();
+        }
+    }
+
+    public override function onFocusLost() {
+        super.onFocusLost();
+        if (instance != null) shouldUpdate = false;
+    }
+    public override function onFocusGained() {
+        super.onFocusGained();
+        shouldUpdate = true;
+    }
+
+    function copyEntries() {
+        prevEntries = [];
+        var curEntries = instance.currentMenuEntries;
+        var i = 0;
+        while (i < curEntries.length) {
+            var entry = curEntries[i];
+            prevEntries.push({
+                text: entry.text,
+                callback: entry.callback,
+                filter: entry.filter
+            });
+            i++;
+        }
+    }
+
+    function transitionOut(state) {
+        var bg = background;
+        var d = disk;
+
+        var objs = [bg, d];
+        var i = 0;
+        while (i < objs.length) {
+            var obj = objs[i];
+            state.remove(obj);
+            PlayState.instance?.add(obj);
+            FlxTween.cancelTweensOf(obj);
+            obj.cameras = state.cameras;
+            i++;
+        }
+
+        FlxTween.tween(bg, {alpha: 0}, 0.3, {
+            ease: FlxEase.cubeOut,
+            onComplete: function() {
+                bg.destroy();
+                if (PlayState.instance?.members?.contains(bg)) PlayState.instance.remove(bg);
+            }
+        });
+
+        FlxTween.tween(d, {x: -d.width, angle: d.angle - 20}, 0.2, {
+            ease: FlxEase.quartOut,
+            onComplete: function() {
+                d.destroy();
+                if (PlayState.instance?.members?.contains(d)) PlayState.instance.remove(d);
+            }
+        });
+
+        itemHitboxes = [];
+    }
+}
+
+private class CurvedText {
+    public var group(default, null):FlxTypedSpriteGroup;
+    public var linesCount(default, null):Int = 0;
+    public var angleOffset:Float = 0;
+    public var charAngle:Float = 5.4;
+    public var maxArc:Float = 105;
+    public var radius:Float = 100;
+    public var radiusStep:Float = 40;
+    public var spacingTightness:Float = 0.6;
+
+    var fontSize:Int;
+    var charScale:Float = 1;
+    var charAngles:Array<Float> = [];
+    var charRadii:Array<Float> = [];
+
+    var _initialized = false;
+    var _pool:Array<FunkinSprite> = [];
+    var _letterFrames:FlxAtlasFrames = null;
+
+    function getLetterFrames():FlxAtlasFrames {
+        if (_letterFrames == null)
+            _letterFrames = Paths.getSparrowAtlas('pause/letterstuff');
+        return _letterFrames;
+    }
+
+    function getSpriteFromPool():FunkinSprite {
+        if (_pool.length > 0) return _pool.pop();
+        var s = new FunkinSprite();
+        s.frames = getLetterFrames();
+        return s;
+    }
+
+    function returnSpriteToPool(sprite:FunkinSprite) {
+        sprite.animation.frameName = "";
+        sprite.visible = false;
+        _pool.push(sprite);
+    }
+
+    public function new(fontSize:Int, ?initialText:String) {
+        this.fontSize = fontSize;
+        group = new FlxTypedSpriteGroup();
+        if (initialText != null) init(initialText);
+    }
+
+    public function init(text:String) {
+        if (_initialized) return;
+        _initialized = true;
+        build(text);
+    }
+
+    function build(text:String) {
+        for (member in group.members) returnSpriteToPool(member);
+        group.clear();
+        charAngles = [];
+        charRadii = [];
+        linesCount = 0;
+        if (text.length == 0) return;
+
+        final BASE_FRAME_SIZE = 64;
+        charScale = fontSize / BASE_FRAME_SIZE;
+        final frames = getLetterFrames();
+
+        // split text into segments
+        var segments = text.split("\n");
+        var allLines:Array<String> = [];
+
+        for (segment in segments) {
+            if (segment.length == 0) continue;
+
+            // tokenize and wrap
+            var tokens:Array<String> = [];
+            var j = 0;
+            while (j < segment.length) {
+                var ch = segment.charAt(j);
+                if (ch == ' ') { j++; continue; }
+                if (ch == '(') {
+                    var start = j;
+                    var depth = 1;
+                    j++;
+                    while (j < segment.length && depth > 0) {
+                        if (segment.charAt(j) == '(') depth++;
+                        else if (segment.charAt(j) == ')') depth--;
+                        j++;
+                    }
+                    tokens.push(segment.substring(start, j));
+                } else {
+                    var start = j;
+                    while (j < segment.length && segment.charAt(j) != ' ' && segment.charAt(j) != '(') j++;
+                    tokens.push(segment.substring(start, j));
+                }
+            }
+
+            var lineIndex = 0;
+            var currentTokens:Array<String> = [];
+            var currentLen = 0;
+            var tokenIndex = 0;
+
+            while (tokenIndex < tokens.length) {
+                var prospectiveLineRadius = radius - lineIndex * radiusStep;
+                var compensationFactor:Float = 1;
+                if (lineIndex > 0)
+                    compensationFactor = 1 + spacingTightness * (radius / prospectiveLineRadius - 1);
+                var actualStep = charAngle * compensationFactor;
+                var maxChars = Math.floor(maxArc / actualStep);
+
+                var token = tokens[tokenIndex];
+                var sp = (currentTokens.length > 0) ? 1 : 0;
+
+                if (currentLen + sp + token.length <= maxChars) {
+                    if (sp > 0) currentLen += sp;
+                    currentTokens.push(token);
+                    currentLen += token.length;
+                    tokenIndex++;
+                } else {
+                    if (currentTokens.length > 0) {
+                        allLines.push(currentTokens.join(" "));
+                        currentTokens = [];
+                        currentLen = 0;
+                        lineIndex++;
+                    } else {
+                        allLines.push(token);
+                        tokenIndex++;
+                        lineIndex++;
+                    }
+                }
+            }
+            if (currentTokens.length > 0) {
+                allLines.push(currentTokens.join(" "));
+                lineIndex++;
+            }
+        }
+
+        linesCount = allLines.length;
+
+        var lineIndex = 0;
+        while (lineIndex < allLines.length) {
+            var line = allLines[lineIndex];
+            var lineRadius = radius - lineIndex * radiusStep;
+
+            var compensationFactor:Float = 1;
+            if (lineIndex > 0)
+                compensationFactor = 1 + spacingTightness * (radius / lineRadius - 1);
+
+            var actualStep = charAngle * compensationFactor;
+            var lineArc = line.length * actualStep;
+            var startAngle = angleOffset - lineArc / 2;
+
+            var j = 0;
+            while (j < line.length) {
+                var charStr = line.charAt(j);
+                if (frames.getByName(charStr) != null) {
+                    var sprite = getSpriteFromPool();
+                    sprite.animation.frameName = charStr;
+                    sprite.scale.set(charScale, charScale);
+                    sprite.updateHitbox();
+                    sprite.origin.set(sprite.width / 2, sprite.height / 2);
+                    sprite.active = false;
+                    sprite.visible = true;
+                    group.add(sprite);
+
+                    var angle = startAngle + j * actualStep;
+                    charAngles.push(angle);
+                    charRadii.push(lineRadius);
+                }
+                j++;
+            }
+            lineIndex++;
+        }
+    }
+
+    public function updatePositions(centerX:Float, centerY:Float, diskAngle:Float) {
+        for (i in 0...group.length) {
+            if (i >= charAngles.length) break;
+            var rad = (diskAngle + charAngles[i]) * Math.PI / 180;
+            var obj = group.members[i];
+            obj.x = centerX + Math.cos(rad) * charRadii[i] - obj.origin.x;
+            obj.y = centerY + Math.sin(rad) * charRadii[i] - obj.origin.y;
+            obj.angle = diskAngle + charAngles[i] + 90;
+        }
+    }
+
+    public function destroy() {
+        var members = group.members;
+        var i = 0;
+        while (i < members.length) {
+            returnSpriteToPool(members[i]);
+            i++;
+        }
+        group.clear();
+        charAngles = null;
+        charRadii = null;
+    }
+}
