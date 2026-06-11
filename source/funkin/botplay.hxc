@@ -1,0 +1,336 @@
+package funkin.modding;
+
+import Math;
+import flixel.FlxG;
+import flixel.util.FlxTimer;
+import flixel.text.FlxText;
+import flixel.text.FlxTextBorderStyle;
+import funkin.Paths;
+import funkin.Conductor;
+import funkin.Highscore;
+import funkin.save.Save;
+import funkin.util.Constants;
+import funkin.play.PlayState;
+import funkin.play.PauseSubState;
+import funkin.play.PlayStatePlaylist;
+import funkin.play.scoring.Scoring;
+import funkin.play.notes.NoteSprite;
+import funkin.modding.module.Module;
+import funkin.modding.module.ModuleHandler;
+import funkin.modding.events.HitNoteScriptEvent;
+//import funkin.ui.debug.charting.ChartEditorState;
+
+class BotPlayModule extends Module {
+	public var isBotActive:Bool = false; // ModuleHandler.getModule('BotPlayModule')?.isBotActive
+	public var overrideScores:Bool = false;
+
+	var botplaySine:Float = 0;
+	var botplayTxt:FlxText;
+
+	public function new()
+	{
+		super("BotPlayModule", 1);
+
+		setupSave();
+	}
+	function setupSave()
+	{
+		if (Save.instance.modOptions.get('botplay') == null) Save.instance.modOptions.set('botplay', {});
+
+		save = Save.instance.modOptions.get('botplay');
+		if (save.isBotActive == null) save.isBotActive = false;
+		if (save.startWithBotplay == null) save.startWithBotplay = false;
+		if (save.overrideScores == null) save.overrideScores = false;
+		if (save.ignoreKinds == null) save.ignoreKinds = [];
+
+		isBotActive = save.isBotActive;
+		overrideScores = save.overrideScores;
+		Save.instance.flush();
+	}
+
+	// disables botplay when we exit the song
+	function onStateChangeEnd(event)
+	{
+		setupSave();
+
+		if (event.targetState is PlayState == false)
+		{
+			save.isBotActive = false;
+		}
+		else save.isBotActive = save.isBotActive || save.startWithBotplay;
+		isBotActive = save.isBotActive;
+		Save.instance.flush();
+	}
+	function onSubStateCloseEnd(event)
+	{
+		if (event.targetState is PlayState)
+		{
+			save.isBotActive = isBotActive = false;
+			Save.instance.flush();
+		}
+	}
+
+	// enables botplay if the save data's like that (after a hot reload, for example)
+	function onSongLoaded(event)
+	{
+		if (save == null) setupSave();
+		isBotActive = (save.isBotActive ?? false) || (save.startWithBotplay ?? false);
+		overrideScores = (save.overrideScores ?? false);
+
+		if (botplayTxt == null || !PlayState.instance.members.contains(botplayTxt)) {
+			botplayTxt = new FlxText(0, 0, 0, "BOTPLAY");
+			botplayTxt.setFormat(Paths.font("vcr.ttf"), 22, 0xffffffff, 'center', FlxTextBorderStyle.OUTLINE, 0xff000000);
+			botplayTxt.scrollFactor.set();
+			botplayTxt.borderSize = 1.25;
+			botplayTxt.visible = isBotActive;
+			PlayState.instance.add(botplayTxt);
+
+			botplaySine = 90;
+			botplayTxt.alpha = 0;
+			botplayTxt.zIndex = 1200;
+			botplayTxt.cameras = [PlayState.instance.camHUD];
+			botplayTxt.setPosition(FlxG.width - botplayTxt.width - 3, FlxG.height - botplayTxt.height - 2);
+		}
+	}
+
+	// prevents the botplay from setting a new highscore
+	function onSongEnd(event)
+	{
+		if (isBotActive && !overrideScores)
+		{
+			PlayState.instance.currentSong.validScore = false;
+			PlayState.instance.isBotPlayMode = true;
+		}
+	}
+
+	// the logic for hitting notes
+	private function goodNoteHit(note:NoteSprite, state:PlayState):Void
+	{
+		var perfectHitDiff = 0;
+		var score = Scoring.scoreNote(perfectHitDiff);
+		var daRating = Scoring.judgeNote(perfectHitDiff);
+		var healthBonus = Constants.HEALTH_SICK_BONUS;
+		
+		var hitEvent = new HitNoteScriptEvent(note, healthBonus, score, daRating, false, 0, perfectHitDiff, true);
+		state.dispatchEvent(hitEvent);
+
+		if (hitEvent.eventCanceled) return;
+
+		Highscore.tallies.totalNotesHit++;
+		Highscore.tallies.sickNotes++;
+
+		state.playerStrumline.hitNote(note);
+		state.playerStrumline.noteVibrations.tryNoteVibration();
+
+		// handles sustain notes
+		if (note.holdNoteSprite != null)
+		{
+			if (state.playerStrumline.isPlayer)
+				state.playerStrumline.pressKey(note.holdNoteSprite.noteDirection);
+			state.playerStrumline.playNoteHoldCover(note.holdNoteSprite);
+		}
+
+		// note splash
+		if (hitEvent.doesNotesplash)
+		{
+			state.playerStrumline.playNoteSplash(note.noteData.getDirection());
+		}
+		
+		state.vocals.playerVolume = 1;
+		state.applyScore(hitEvent.score, hitEvent.judgement, hitEvent.healthChange, hitEvent.isComboBreak);
+		state.popUpScore(hitEvent.judgement);
+
+		// plays character animations
+		if (state.currentStage != null) {
+			state.currentStage.getBoyfriend()?.holdTimer = 0;
+			state.currentStage.getGirlfriend()?.playComboAnimation(Highscore.tallies.combo);
+		}
+
+	}
+
+	// this shouldn't normally happen
+	// converts misses to hits when the botplay is active
+	function onNoteMiss(event)
+	{
+		if (isBotActive)
+		{
+			if (save.ignoreKinds.contains(event.note.kind) || save.ignoreKinds.contains('non_scoreable') && !event.note.scoreable) return;
+
+			event.cancel();
+			goodNoteHit(event.note, PlayState.instance);
+		}
+	}
+
+	// ignores player input if the botplay is active
+	function onNoteGhostMiss(event)
+	{
+		if (isBotActive) event.cancel();
+	}
+
+	// this shouldn't normally happen
+	// ignores hold note drops when the botplay is active
+	function onNoteHoldDrop(event)
+	{
+		if (isBotActive) event.cancel();
+	}
+
+	// ignores input if the botplay is active and the note was hit too early
+	function onNoteHit(event)
+	{
+		if (isBotActive && event.note.noteData.getMustHitNote() && PlayState.instance != null) {
+			if (event.hitDiff != 0) {
+				PlayState.instance.playerStrumline.playStatic(event.note.noteData.getDirection());
+				event.cancel();
+			}
+		}
+	}
+
+	override function onUpdate(event)
+	{
+		super.onUpdate(event);
+		onUpdatePause(event);
+
+		if (!isBotActive || PlayState.instance?.playerStrumline == null || PlayState.instance.isGamePaused) return;
+
+		var state = PlayState.instance;
+
+		for (note in state.playerStrumline.getNotesMayHit())
+		{
+			if (note == null || !note.alive || note.hasBeenHit) continue;
+			if (save.ignoreKinds.contains(note.kind) || save.ignoreKinds.contains('non_scoreable') && !note.scoreable) continue;
+
+			if (Conductor.instance.songPosition >= note.strumTime)
+			{
+				goodNoteHit(note, state);
+			}
+		}
+
+		for (holdNote in state.playerStrumline.holdNotes.members)
+		{
+			if (holdNote == null || !holdNote.alive) continue;
+			if (holdNote.hitNote && !holdNote.missedNote && holdNote.sustainLength > 0)
+			{
+				if (state.currentStage != null && state.currentStage.getPlayer() != null && state.currentStage.getPlayer().isSinging())
+					state.currentStage.getPlayer().holdTimer = 0;
+			}
+			else if (holdNote.hitNote && holdNote.sustainLength <= 0 && state.playerStrumline.isPlayer)
+			{
+				state.playerStrumline.releaseKey(holdNote.noteDirection);
+			}
+		}
+
+		if (botplayTxt != null && state.members.contains(botplayTxt) && botplayTxt.visible)
+		{
+			if (!state.isInCutscene || botplayTxt.alpha > 0.01)
+			{
+				botplaySine += 180 * event.elapsed;
+			}
+			else
+			{
+				botplaySine = 0;
+			}
+
+			botplayTxt.alpha = Math.min(1, 1 - Math.sin((Math.PI * botplaySine) / 180)) * 0.7;
+		}
+	}
+
+	// creates the botplay toggle in the pause menu
+	function onUpdatePause(event)
+	{
+		var state = PlayState.instance?.subState;
+
+		if (state == null || state is PauseSubState == false) return;
+
+		// function to move the pause menu items more up on mobile devices so it fits on the screen
+		function scrollPause(state:PauseSubState)
+		{
+			if (FlxG.onMobile && state.currentMenuEntries.length >= 6)
+			{
+				for (entry in state.currentMenuEntries)
+				{
+					entry.sprite.y -= 105 * (state.currentMenuEntries.length == 6 ? 3/4 : 1);
+				}
+			}
+		}
+
+		// checks if we have already created a toggle
+		var found = false;
+		for (a in state.currentMenuEntries)
+		{
+			if (a.text == "Enable Botplay" || a.text == "Disable Botplay")
+			found = true;
+		}
+
+		// creates the toggle
+		if (!found && state.currentMode != 'Difficulty')
+		{
+			if (save == null) setupSave();
+
+			var menuEntries = state.currentMenuEntries;
+			var insertIndex = menuEntries.length > 1 ? menuEntries.length - 1 : menuEntries.length;
+			var wasBotActive = isBotActive == true;
+
+			menuEntries.insert(insertIndex, {
+				text: (isBotActive ? "Disable" : "Enable") + " Botplay",
+				callback: () -> {
+					save.isBotActive = !isBotActive;
+					isBotActive = save.isBotActive;
+					Save.instance.flush();
+
+					menuEntries[insertIndex].text = (isBotActive ? "Disable" : "Enable") + " Botplay";
+					botplayTxt?.visible = isBotActive;
+
+					// we gotta keep this true on mobile so the notes render properly with the arrows control scheme
+					PlayState.instance.playerStrumline.isPlayer = (!isBotActive || PlayState.instance.playerStrumline.inArrowControlSchemeMode);
+
+					if (wasBotActive && !overrideScores)
+					{
+						PauseSubState.restartPlayState(state);
+						PlayStatePlaylist.campaignScore = 0;
+					}
+					else
+					{
+						state.clearAndAddMenuEntries();
+						state.changeSelection();
+						scrollPause(state);
+					}
+				}
+			});
+			state.clearAndAddMenuEntries();
+			state.changeSelection();
+			scrollPause(state);
+		}
+	}
+
+
+	// for scripted mechanics like dodging
+	function onSongEvent(event)
+	{
+		super.onSongEvent(event);
+		
+		if (!isBotActive) return;
+		if (PlayState.instance == null || event.eventData?.eventKind == null) return;
+
+		switch (event.eventData.eventKind)
+		{
+			// QT:Rewired
+			case "sawKB":
+				var module = (PlayState.instance.currentStage?.scriptGet('moduleCheck') ?? ModuleHandler.getModule("SawbladeAndDodgeModule"));
+				if (module != null)
+				{
+					new FlxTimer().start(Conductor.instance.beatLengthMs / 1000 * 1.85, function(botplayDodge)
+					{
+						module.scriptCall('bfDodge');
+					});
+				}
+
+			// QT (the other one)
+			case "KB_AttackFire":
+				var module = ModuleHandler.getModule("QTdodgeModule");
+				if (module != null)
+				{
+					module.scriptCall('dodge');
+				}
+		}
+	}
+}

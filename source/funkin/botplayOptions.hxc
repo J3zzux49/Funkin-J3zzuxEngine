@@ -1,0 +1,125 @@
+package funkin.modding;
+
+import flixel.FlxG;
+import funkin.Paths;
+import funkin.Conductor;
+import funkin.Highscore;
+import funkin.save.Save;
+import funkin.ui.Page;
+import funkin.ui.FullScreenScaleMode;
+import funkin.ui.options.OptionsState;
+import funkin.ui.options.PreferencesMenu;
+import funkin.play.notes.notekind.NoteKindManager;
+import funkin.modding.module.Module;
+import funkin.modding.module.ModuleHandler;
+
+class BotPlayOptionsModule extends Module
+{
+	function new()
+	{
+		super("BotPlayOptionsModule");
+	}
+
+	function onStateChangeEnd(event)
+	{
+		var state = event.targetState;
+		var save = Save.instance.modOptions.get('botplay');
+
+		if (state is OptionsState)
+		{
+			var codex = state.optionsCodex;
+
+			var page = codex.addPage('botplay', new PreferencesMenu());
+			page.onExit.add(function(){
+				codex.switchPage('options');
+			});
+			for(d in page.items){
+				d.destroy();
+			}
+			for(d in page.preferenceItems){
+				d.destroy();
+			}
+			page.items.clear();
+			page.preferenceItems.clear();
+			page.preferenceDesc = [];
+
+			var options = codex.pages.get('options');
+			var items = [];
+			for (i => item in options.items.members) {
+				if (i < 2) continue;
+				item.y += 100;
+				options.items.remove(item);
+				items.push(item);
+			}
+
+			var item = options.items.createItem(0, options.items.members[1].y + 100, "botplay options", "bold", function(){
+				options.onSwitch.dispatch('botplay');
+			});
+			item.x = (FlxG.width - item.width) / 2;
+
+			for (item in items) options.items.add(item);
+
+			page.createPrefItemCheckbox("Enable Botplay", "Automatically activates botplay the moment you enter a song.", function(val){
+				save.startWithBotplay = val;
+				Save.instance.flush();
+			}, save.startWithBotplay);
+			
+			page.createPrefItemCheckbox("Override Scores", "Whether the scores gotten with botplay save or not.", function(val){
+				save.overrideScores = val;
+				Save.instance.flush();
+			}, save.overrideScores);
+
+			createIgnoreKindMenu(codex);
+			var item = page.items.createItem(FullScreenScaleMode.gameNotchSize.x, (120 * page.items.length) + 30, "Note Exclusions", "bold", function(){
+				options.onSwitch.dispatch('botplayExceptions');
+			});
+			page.items.addItem("Note Exclusions", item);
+			page.preferenceDesc.push("Select which note types the botplay should intentionally skip over and miss.");
+
+			page.itemDesc.text = page.preferenceDesc[0];
+		}
+	}
+
+	function createIgnoreKindMenu(codex) {
+		var save = Save.instance.modOptions.get('botplay');
+		var page = codex.addPage('botplayExceptions', new PreferencesMenu());
+		page.onExit.add(function(){
+			codex.switchPage('botplay');
+		});
+		for(d in page.items){
+			d.destroy();
+		}
+		for(d in page.preferenceItems){
+			d.destroy();
+		}
+		page.items.clear();
+		page.preferenceItems.clear();
+		page.preferenceDesc = [];
+
+		page.createPrefItemCheckbox('Nonscoreable', 'Should botplay ignore ALL non-scoreable notes?', function(val){
+			var id = 'non_scoreable';
+			var contains = save.ignoreKinds.contains(id);
+			if (val) {
+				if (!contains) save.ignoreKinds.push(id);
+			} else {
+				if (contains) save.ignoreKinds.remove(id);
+			}
+			Save.instance.flush();
+		}, save.ignoreKinds.contains('non_scoreable'));
+
+		for (kind in NoteKindManager.noteKinds) {
+			if (kind == 'noanim' || kind == 'non_scoreable') continue;
+
+			page.createPrefItemCheckbox(kind.description, 'Should botplay ignore "${kind.noteKind}" notes?', function(val){
+				var contains = save.ignoreKinds.contains(kind.noteKind);
+				if (val) {
+					if (!contains) save.ignoreKinds.push(kind.noteKind);
+				} else {
+					if (contains) save.ignoreKinds.remove(kind.noteKind);
+				}
+				Save.instance.flush();
+			}, save.ignoreKinds.contains(kind.noteKind));
+		}
+		page.itemDesc.text = page.preferenceDesc[0];
+	}
+}
