@@ -1,0 +1,68 @@
+import flixel.FlxG;
+import flixel.util.FlxSave;
+
+import funkin.modding.module.Module;
+import funkin.modding.base.ScriptedMusicBeatSubState;
+import funkin.ui.options.OptionsState;
+import funkin.ui.MusicBeatState;
+
+import funkin.play.PlayState;
+import funkin.play.PauseSubState;
+import funkin.play.GameOverSubState;
+import funkin.play.PlayStatePlaylist;
+import funkin.play.OptionsState;
+import funkin.ui.transition.LoadingState;
+import funkin.ui.mainmenu.MainMenuState;
+import funkin.audio.FunkinSound;
+
+import Std;
+
+import funkin.util.ReflectUtil;
+
+class OptionsOnPauseMenu extends Module 
+{
+	public function new(){
+		super("Options On Pause Menu");
+	}
+
+	var onPlayState:Bool = false;
+	
+var didit = false;
+	
+	override function onUpdate(event) {
+var state = FlxG.state.subState;
+if(onPlayState && FlxG.keys.enabled == false)
+{
+FlxG.switchState(() -> new PlayState());
+onPlayState = false;
+FlxG.keys.enabled = true;
+}
+var substateClassName = ReflectUtil.getClassNameOf(FlxG.state.subState);
+if(substateClassName != 'funkin.play.PauseSubState')
+{
+didit = false;
+}
+if(substateClassName == 'funkin.play.PauseSubState')
+{
+			if(!didit)
+			{
+			didit = true;
+			state.persistentUpdate = false;
+				// post state create
+				var menuEntries = state.currentMenuEntries;
+				menuEntries.insert(menuEntries.length - 2, {
+					text: "Options",
+					callback: ()->{
+					FunkinSound.playMusic('freakyMenu',{overrideExisting: true, restartTrack: false, persist: true});
+					FlxG.switchState(() -> new OptionsState());
+					onPlayState = true;
+					}
+				});
+				
+				state.clearAndAddMenuEntries();
+				state.changeSelection();
+			}
+}
+		super.onUpdate(event);
+	}
+}
