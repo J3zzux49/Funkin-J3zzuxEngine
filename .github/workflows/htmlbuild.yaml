@@ -17,44 +17,69 @@ jobs:
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
+        submodules: true # CRITICAL FOR FNF 0.8.5: Ensures assets submodules load
 
-    # 1. Setup V-Slice Compatible Haxe Version
+    # 1. Pull Submodules explicitly if checkout missed them
+    - name: Initialize Asset Submodules
+      run: |
+        git submodule update --init --recursive
+
+    # 2. Setup V-Slice Compatible Haxe Version
     - name: Setup Haxe
       uses: krdlab/setup-haxe@v1
       with:
         haxe-version: 4.3.4
 
-    # 2. Complete Environment Configuration & Error Prevention
+    # 3. Setup precise FNF 0.8.5 Core Dependencies
     - name: Install V-Slice Dependencies
       shell: cmd
       run: |
-        haxelib install lime
+        :: Core framework installations
+        haxelib install lime 8.1.2
         haxelib run lime setup
-        haxelib install openfl
-        haxelib install flixel
+        haxelib install openfl 9.3.3
+        haxelib install flixel 5.6.2
+        haxelib run flixel setup
+        
+        :: Install build automation tools used by FNF 0.8.5
+        haxelib install flixel-addons 3.2.3
+        haxelib install flixel-ui 2.6.1
+        haxelib install hscript-iris 1.1.0
+        haxelib install tjson 1.4.0
+        
+        :: Setup Haxe Module Manager globally for local configurations
         haxelib --global install hmm
         haxelib --global run hmm setup
-        powershell -Command "(Get-Content hmm.json) -replace '\"funkin.vis\"', '// \"funkin.vis\"' | Set-Content hmm.json"
-        hmm install
+        
+        :: Run automated module sync if hmm.json is present
+        if exist hmm.json (
+            powershell -Command "(Get-Content hmm.json) -replace '\"funkin.vis\"', '// \"funkin.vis\"' | Set-Content hmm.json"
+            hmm install
+        )
 
-    # 3. Create the automated target container
+    # 4. Create the automated target container
     - name: Create output directory
       shell: cmd
       run: |
         if not exist "pre-built builds" mkdir "pre-built builds"
 
-    # 4. Trigger isolated batch compilation
+    # 5. Trigger isolated batch compilation
     - name: Run build script
       shell: cmd
       run: |
         call scripts\itch-building\build-Itch-HTML.bat
 
-    # 5. Commit compiled HTML5 assets directly back to the repository
+    # 6. Commit compiled HTML5 assets directly back to the repository
     - name: Commit and push changes
       shell: bash
       run: |
         git config --global user.name "github-actions[bot]"
         git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-        git add "pre-built builds/"
-        git status
-        git diff-index --quiet HEAD || (git commit -m "Add automated build artifacts" && git push origin main)
+        git add .
+        
+        if [ -n "$(git status --porcelain)" ]; then
+          git commit -m "Add automated build artifacts for FNF 0.8.5"
+          git push origin main
+        else
+          echo "No changes detected. Skipping commit."
+        fi
